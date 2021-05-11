@@ -24,14 +24,7 @@ class ShallowMixin(PandasObject):
     @final
     def _shallow_copy(self, obj, **kwargs):
         """
-        Return a new object with the replacement attributes.
-
-        Parameters
-        ----------
-        obj: 
-            Object to Copy.
-        **kwargs:
-            Attribute to check for.
+        return a new object with the replacement attributes
         """
         if isinstance(obj, self._constructor):
             obj = obj.obj
