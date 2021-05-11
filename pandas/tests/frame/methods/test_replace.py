@@ -10,6 +10,8 @@ from typing import (
 import numpy as np
 import pytest
 
+from pandas.compat import np_version_under1p20
+
 import pandas as pd
 from pandas import (
     DataFrame,
@@ -561,10 +563,11 @@ class TestDataFrameReplace:
         tm.assert_frame_equal(res3, expec)
         tm.assert_frame_equal(res4, expec)
 
-    def test_regex_replace_dict_nested_non_first_character(self):
+    def test_regex_replace_dict_nested_non_first_character(self, any_string_dtype):
         # GH 25259
-        df = DataFrame({"first": ["abc", "bca", "cab"]})
-        expected = DataFrame({"first": [".bc", "bc.", "c.b"]})
+        dtype = any_string_dtype
+        df = DataFrame({"first": ["abc", "bca", "cab"]}, dtype=dtype)
+        expected = DataFrame({"first": [".bc", "bc.", "c.b"]}, dtype=dtype)
         result = df.replace({"a": "."}, regex=True)
         tm.assert_frame_equal(result, expected)
 
@@ -654,12 +657,52 @@ class TestDataFrameReplace:
         tm.assert_frame_equal(res, expec)
         assert res.a.dtype == np.object_
 
+    @pytest.mark.parametrize(
+        "to_replace", [{"": np.nan, ",": ""}, {",": "", "": np.nan}]
+    )
+    def test_joint_simple_replace_and_regex_replace(self, to_replace):
+        # GH-39338
+        df = DataFrame(
+            {
+                "col1": ["1,000", "a", "3"],
+                "col2": ["a", "", "b"],
+                "col3": ["a", "b", "c"],
+            }
+        )
+        result = df.replace(regex=to_replace)
+        expected = DataFrame(
+            {
+                "col1": ["1000", "a", "3"],
+                "col2": ["a", np.nan, "b"],
+                "col3": ["a", "b", "c"],
+            }
+        )
+        tm.assert_frame_equal(result, expected)
+
     @pytest.mark.parametrize("metachar", ["[]", "()", r"\d", r"\w", r"\s"])
     def test_replace_regex_metachar(self, metachar):
         df = DataFrame({"a": [metachar, "else"]})
         result = df.replace({"a": {metachar: "paren"}})
         expected = DataFrame({"a": ["paren", "else"]})
         tm.assert_frame_equal(result, expected)
+
+    @pytest.mark.parametrize(
+        "data,to_replace,expected",
+        [
+            (["xax", "xbx"], {"a": "c", "b": "d"}, ["xcx", "xdx"]),
+            (["d", "", ""], {r"^\s*$": pd.NA}, ["d", pd.NA, pd.NA]),
+        ],
+    )
+    def test_regex_replace_string_types(
+        self, data, to_replace, expected, frame_or_series, any_string_dtype
+    ):
+        # GH-41333, GH-35977
+        dtype = any_string_dtype
+        obj = frame_or_series(data, dtype=dtype)
+        result = obj.replace(to_replace, regex=True)
+        expected = frame_or_series(expected, dtype=dtype)
+
+        tm.assert_equal(result, expected)
 
     def test_replace(self, datetime_frame):
         datetime_frame["A"][:5] = np.nan
@@ -1492,8 +1535,14 @@ class TestDataFrameReplace:
             np.float64(1),
         ],
     )
-    def test_replace_replacer_dtype(self, replacer):
+    def test_replace_replacer_dtype(self, request, replacer):
         # GH26632
+        if np.isscalar(replacer) and replacer.dtype.itemsize < 8:
+            request.node.add_marker(
+                pytest.mark.xfail(
+                    np_version_under1p20, reason="np.putmask doesn't coerce dtype"
+                )
+            )
         df = DataFrame(["a"])
         result = df.replace({"a": replacer, "b": replacer})
         expected = DataFrame([replacer])
